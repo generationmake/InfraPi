@@ -29,6 +29,7 @@ void usage(void)
 	printf("-h           print this help\n");
 	printf("-i           use interpolation on thermal data\n");
 	printf("-f <file>    generate image file from each frame\n");
+	printf("-s <file>    generate file with temperature data from each frame\n");
 	printf("-l <file>    generate temperature log file\n");
 	printf("-v <file>    generate video file\n");
 }
@@ -44,8 +45,10 @@ int main(int argv, char **argc)
 	char stringBuf[10];	//buffer for strings
 	std::time_t timestamp, timestamplast=0;
 	std::ofstream logfile;
+	std::ofstream tempfile;
 	char *name_video="output.avi";
-	char *name_file="/dev/shm/opencv_stream.jpg";
+	char *name_file="/dev/shm/image/opencv_stream.jpg";
+	char *name_tempfile="/dev/shm/temp.dat";
 	char *name_log="temp.log";
 
 // flags
@@ -53,6 +56,7 @@ int main(int argv, char **argc)
 	bool mode_interpolation=0;
 	bool mode_video=0;
 	bool mode_file=0;
+	bool mode_tempfile=0;
 	bool mode_log=0;
 
 	if(argv<2)
@@ -94,6 +98,18 @@ int main(int argv, char **argc)
 				}
 			}
 		}
+		if(strncmp(argc[i],"-s",2)==0)
+		{
+			mode_tempfile=1;
+			if(i<argv-1)
+			{
+				if(argc[i+1][0]!='-')
+				{
+					i++;
+					name_tempfile=argc[i];
+				}
+			}
+		}
 		if(strncmp(argc[i],"-l",2)==0) 
 		{
 			mode_log=1;
@@ -111,9 +127,11 @@ int main(int argv, char **argc)
 	printf("mode_interpolation = %i\n", mode_interpolation);
 	printf("mode_video = %i\n", mode_video);
 	printf("mode_file  = %i\n", mode_file);
+	printf("mode_tempfile  = %i\n", mode_tempfile);
 	printf("mode_log   = %i\n", mode_log);
 	printf("name_video = %s\n", name_video);
 	printf("name_file  = %s\n", name_file);
+	printf("name_tempfile  = %s\n", name_tempfile);
 	printf("name_log   = %s\n", name_log);
 
 	int end=1;  // variable to end program
@@ -222,6 +240,12 @@ int main(int argv, char **argc)
 		if(!mode_quiet) cv::imshow("combined",cameraImageBigOutput);  // display mat on screen
  		if(mode_video) outputVideo << cameraImageBigOutput;	// add frame to video
 		if(mode_file) cv::imwrite(name_file,cameraImageBigOutput);	// write file to disk
+		if(mode_tempfile) 	// store temperature data to file
+		{
+			tempfile.open(name_tempfile, std::ios::trunc);
+			tempfile<<temp_max<<std::endl;
+			tempfile.close();
+		}
 
 		t.stop();    // stop timer  
 		printf("max. Temp: %f\n",temp_max);
