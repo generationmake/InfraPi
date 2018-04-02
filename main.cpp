@@ -46,6 +46,8 @@ int main(int argv, char **argc)
 	signed short int internal_temp;
 	signed short int pixel_temp[64];	// array for pixel temperatures
 	double temp_min=0,temp_max=0;	// min. and max. temperature of sensor
+	double temp_min_ever=100.0,temp_max_ever=0;	// min. and max. temperature of sensor forever
+	double norm_multi=0;		// multiplicator for normalisation mode 2
 	char stringBuf[10];	//buffer for strings
 	std::time_t timestamp, timestamplast=0;
 	std::ofstream logfile;
@@ -230,21 +232,22 @@ int main(int argv, char **argc)
 		for(x=0;x<64;x++)
 		{
 			pixel_temp[x]=(signed short)(pixel_temp[x]<<4)/16;	// set pixel_temp to original value
-	//		if(pixel_temp[x]>temp_max) temp_max=pixel_temp[x];	// find max. temp of scan
 		}
-	//	temp_max=temp_max/4.0;
 
 		for(x=0;x<8;x++)
 		{
 			for(y=0;y<8;y++)
 			{
 				outSmallfloat.at<float>(7-x,7-y)=pixel_temp[x*8+y];	// save data to opencv mat and rotate it
-//				outSmall.at<char>(7-x,7-y)=(pixel_temp[x*8+y]*64)/100;	// save data to opencv mat and rotate it
 			}
 		}
 		outSmallfloat=outSmallfloat/4.0;
 		cv::minMaxLoc(outSmallfloat, &temp_min, &temp_max);	// get min max temperature
+		if(temp_min<temp_min_ever) temp_min_ever=temp_min;
+		if(temp_max>temp_max_ever) temp_max_ever=temp_max;
+		norm_multi=256.0/(temp_max_ever-temp_min_ever);
 		if(mode_normalisation==1) cv::normalize(outSmallfloat,outSmallfloat,255,0,cv::NORM_MINMAX);	// normalize Mat to values between 0 and 255
+		else if(mode_normalisation==2) outSmallfloat=(outSmallfloat-temp_min_ever)*norm_multi;
 		else outSmallfloat=outSmallfloat/100.0*256.0;	// convert values to full uchar8 range
 		outSmallfloat.convertTo(outSmall,CV_8UC1);	// convert float mat to uchar8 mat
 		if(mode_interpolation) cv::resize(outSmall,outSmallnorm,cv::Size(320,320));	// resize Mat to 320 x 320 pixel
@@ -272,6 +275,16 @@ int main(int argv, char **argc)
 			cv::putText(cameraImageBigOutput, stringBuf, cv::Point(345,25),1,1,cv::Scalar(255,255,255));
 			sprintf(stringBuf,"%.1f",temp_min);
 			cv::putText(cameraImageBigOutput, stringBuf, cv::Point(345,305),1,1,cv::Scalar(255,255,255));
+		}
+		else if(mode_normalisation==2)
+		{
+			cv::rectangle(cameraImageBigOutput, cv::Point(345,0), cv::Point(380,320), cv::Scalar(0), -1);	// clear area for temp display
+			sprintf(stringBuf,"%.1f",temp_max_ever);
+			cv::putText(cameraImageBigOutput, stringBuf, cv::Point(345,25),1,1,cv::Scalar(255,255,255));
+			sprintf(stringBuf,"%.1f",temp_min_ever);
+			cv::putText(cameraImageBigOutput, stringBuf, cv::Point(345,305),1,1,cv::Scalar(255,255,255));
+			sprintf(stringBuf,"%.1f",temp_max);
+			cv::putText(cameraImageBigOutput, stringBuf, cv::Point(345,295-((temp_max-temp_min_ever)*norm_multi)),1,1,cv::Scalar(255,255,255));
 		}
 
 		if(mode_log) logfile<<temp_max<<std::endl;
