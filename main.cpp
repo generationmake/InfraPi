@@ -32,6 +32,7 @@ void usage(void)
 	printf("-n1          normalisation mode 1: dynamic range on each frame\n");
 	printf("-n2          normalisation mode 2: dynamec range over runtime\n");
 	printf("-i           use interpolation on thermal data\n");
+	printf("-t           write temperature value of each pixel to image\n");
 	printf("-f <file>    generate image file from each frame\n");
 	printf("-s <file>    generate file with temperature data from each frame\n");
 	printf("-l <file>    generate temperature log file\n");
@@ -67,6 +68,7 @@ int main(int argv, char **argc)
 	bool mode_log=0;
 	bool mode_camera=1;
 	int mode_normalisation=0;
+	bool mode_values=0;
 
 	for(i=1;i<argv;i++)
 	{
@@ -82,6 +84,7 @@ int main(int argv, char **argc)
 		if(strncmp(argc[i],"-n0",3)==0) mode_normalisation=0;
 		if(strncmp(argc[i],"-n1",3)==0) mode_normalisation=1;
 		if(strncmp(argc[i],"-n2",3)==0) mode_normalisation=2;
+		if(strncmp(argc[i],"-t",2)==0) mode_values=1;
 		if(strncmp(argc[i],"-v",2)==0)
 		{
 			mode_video=1;
@@ -134,6 +137,7 @@ int main(int argv, char **argc)
 	printf("mode_quiet = %i\n", mode_quiet);
 	printf("mode_interpolation = %i\n", mode_interpolation);
 	printf("mode_normalisation = %i\n", mode_normalisation);
+	printf("mode_values = %i\n", mode_values);
 	printf("mode_camera = %i\n", mode_camera);
 	printf("mode_video = %i\n", mode_video);
 	printf("mode_file  = %i\n", mode_file);
@@ -185,6 +189,7 @@ int main(int argv, char **argc)
 	}
 
 	cv::Mat outSmallfloat(8,8,CV_32F);		// create opencv mat for sensor data as float
+	cv::Mat outSmallfloatn(8,8,CV_32F);		// create opencv mat for sensor data as normalized float
 	cv::Mat outSmall(8,8,CV_8UC1);		// create opencv mat for sensor data
 	cv::Mat outSmallnorm(8,8,CV_8UC1);	// create opencv mat for normalized data
 	cv::Mat outColor;	// create opencv mat for color output
@@ -246,10 +251,10 @@ int main(int argv, char **argc)
 		if(temp_min<temp_min_ever) temp_min_ever=temp_min;
 		if(temp_max>temp_max_ever) temp_max_ever=temp_max;
 		norm_multi=256.0/(temp_max_ever-temp_min_ever);
-		if(mode_normalisation==1) cv::normalize(outSmallfloat,outSmallfloat,255,0,cv::NORM_MINMAX);	// normalize Mat to values between 0 and 255
-		else if(mode_normalisation==2) outSmallfloat=(outSmallfloat-temp_min_ever)*norm_multi;
-		else outSmallfloat=outSmallfloat/100.0*256.0;	// convert values to full uchar8 range
-		outSmallfloat.convertTo(outSmall,CV_8UC1);	// convert float mat to uchar8 mat
+		if(mode_normalisation==1) cv::normalize(outSmallfloat,outSmallfloatn,255,0,cv::NORM_MINMAX);	// normalize Mat to values between 0 and 255
+		else if(mode_normalisation==2) outSmallfloatn=(outSmallfloat-temp_min_ever)*norm_multi;
+		else outSmallfloatn=outSmallfloat/100.0*256.0;	// convert values to full uchar8 range
+		outSmallfloatn.convertTo(outSmall,CV_8UC1);	// convert float mat to uchar8 mat
 		if(mode_interpolation) cv::resize(outSmall,outSmallnorm,cv::Size(320,320));	// resize Mat to 320 x 320 pixel
 		else cv::resize(outSmall,outSmallnorm,cv::Size(320,320),0,0,cv::INTER_NEAREST);	// resize Mat to 320 x 320 pixel
 		cv::applyColorMap(outSmallnorm,outColor,cv::COLORMAP_JET);  // generate colored output with colormap
@@ -285,6 +290,17 @@ int main(int argv, char **argc)
 			cv::putText(cameraImageBigOutput, stringBuf, cv::Point(345,305),1,1,cv::Scalar(255,255,255));
 			sprintf(stringBuf,"%.1f",temp_max);
 			cv::putText(cameraImageBigOutput, stringBuf, cv::Point(345,295-((temp_max-temp_min_ever)*norm_multi)),1,1,cv::Scalar(255,255,255));
+		}
+		if(mode_values==1)
+		{
+			for(x=0;x<8;x++)
+			{
+				for(y=0;y<8;y++)
+				{
+					sprintf(stringBuf,"%.1f",outSmallfloat.at<float>(y,x));	// save data to opencv mat and rotate it
+					cv::putText(cameraImageBigOutput, stringBuf, cv::Point(x*40+5,y*40+25),1,0.8,cv::Scalar(255,255,255));
+				}
+			}
 		}
 
 		if(mode_log) logfile<<temp_max<<std::endl;
