@@ -28,6 +28,9 @@ void usage(void)
 	printf("-q           quiet mode, no live output of image\n");
 	printf("-h           print this help\n");
 	printf("-nocam       don't use camera input, just temperature sensor\n");
+	printf("-n0          normalisation mode 0: range 0 to 100 degrees\n");
+	printf("-n1          normalisation mode 1: dynamic range on each frame\n");
+	printf("-n2          normalisation mode 2: dynamec range over runtime\n");
 	printf("-i           use interpolation on thermal data\n");
 	printf("-f <file>    generate image file from each frame\n");
 	printf("-s <file>    generate file with temperature data from each frame\n");
@@ -42,7 +45,7 @@ int main(int argv, char **argc)
 	int x,y,i; 	// variables to got through the array
 	signed short int internal_temp;
 	signed short int pixel_temp[64];	// array for pixel temperatures
-	float temp_max=0;	// max. temperature of sensor
+	double temp_min=0,temp_max=0;	// min. and max. temperature of sensor
 	char stringBuf[10];	//buffer for strings
 	std::time_t timestamp, timestamplast=0;
 	std::ofstream logfile;
@@ -61,6 +64,7 @@ int main(int argv, char **argc)
 	bool mode_tempfile=0;
 	bool mode_log=0;
 	bool mode_camera=1;
+	int mode_normalisation=0;
 
 	for(i=1;i<argv;i++)
 	{
@@ -73,6 +77,9 @@ int main(int argv, char **argc)
 		if(strncmp(argc[i],"-q",2)==0) mode_quiet=1;
 		if(strncmp(argc[i],"-i",2)==0) mode_interpolation=1;
 		if(strncmp(argc[i],"-nocam",6)==0) mode_camera=0;
+		if(strncmp(argc[i],"-n0",3)==0) mode_normalisation=0;
+		if(strncmp(argc[i],"-n1",3)==0) mode_normalisation=1;
+		if(strncmp(argc[i],"-n2",3)==0) mode_normalisation=2;
 		if(strncmp(argc[i],"-v",2)==0)
 		{
 			mode_video=1;
@@ -124,6 +131,7 @@ int main(int argv, char **argc)
 	}
 	printf("mode_quiet = %i\n", mode_quiet);
 	printf("mode_interpolation = %i\n", mode_interpolation);
+	printf("mode_normalisation = %i\n", mode_normalisation);
 	printf("mode_camera = %i\n", mode_camera);
 	printf("mode_video = %i\n", mode_video);
 	printf("mode_file  = %i\n", mode_file);
@@ -174,6 +182,7 @@ int main(int argv, char **argc)
 		}
 	}
 
+	cv::Mat outSmallfloat(8,8,CV_32F);		// create opencv mat for sensor data as float
 	cv::Mat outSmall(8,8,CV_8UC1);		// create opencv mat for sensor data
 	cv::Mat outSmallnorm(8,8,CV_8UC1);	// create opencv mat for normalized data
 	cv::Mat outColor;	// create opencv mat for color output
@@ -191,8 +200,11 @@ int main(int argv, char **argc)
 	}
 	cv::applyColorMap(tempBar,tempBar,cv::COLORMAP_JET);  // generate colored output with colormap
 	tempBar.copyTo(cameraImageBigOutput(cv::Rect(330, 32, 5, 256)));	// copy tempBar to big image
-	cv::putText(cameraImageBigOutput, "100", cv::Point(345,25),1,1,cv::Scalar(255,255,255));
-	cv::putText(cameraImageBigOutput, "0", cv::Point(345,305),1,1,cv::Scalar(255,255,255));
+	if(mode_normalisation==0)
+	{
+		cv::putText(cameraImageBigOutput, "100", cv::Point(345,25),1,1,cv::Scalar(255,255,255));
+		cv::putText(cameraImageBigOutput, "0", cv::Point(345,305),1,1,cv::Scalar(255,255,255));
+	}
 	if(mode_camera==1)
 	{
 		cap >> cameraImage;	// copy camera input to opencv mat to get data to startup
@@ -208,6 +220,7 @@ int main(int argv, char **argc)
 	        cv::TickMeter t;  
 	        t.start();    // start timer  
 		temp_max=0;
+		temp_min=0;
 
 		x=i2c_smbus_read_i2c_block_data(file,0x80,32,(__u8*)pixel_temp);	// read first 32 byte / 16 temperature pixels from sensor
 		x=i2c_smbus_read_i2c_block_data(file,0xa0,32,(__u8*)pixel_temp+32);       // read next 32 byte / 16 temperature pixels from sensor
@@ -217,19 +230,23 @@ int main(int argv, char **argc)
 		for(x=0;x<64;x++)
 		{
 			pixel_temp[x]=(signed short)(pixel_temp[x]<<4)/16;	// set pixel_temp to original value
-			if(pixel_temp[x]>temp_max) temp_max=pixel_temp[x];	// find max. temp of scan
+	//		if(pixel_temp[x]>temp_max) temp_max=pixel_temp[x];	// find max. temp of scan
 		}
-		temp_max=temp_max/4.0;
+	//	temp_max=temp_max/4.0;
 
 		for(x=0;x<8;x++)
 		{
 			for(y=0;y<8;y++)
 			{
-				outSmall.at<char>(7-x,7-y)=(pixel_temp[x*8+y]*64)/100;	// save data to opencv mat and rotate it
+				outSmallfloat.at<float>(7-x,7-y)=pixel_temp[x*8+y];	// save data to opencv mat and rotate it
+//				outSmall.at<char>(7-x,7-y)=(pixel_temp[x*8+y]*64)/100;	// save data to opencv mat and rotate it
 			}
 		}
-
-//		cv::normalize(outSmall,outSmallnorm,255,0,cv::NORM_MINMAX);	// normalize Mat to values between 0 and 255
+		outSmallfloat=outSmallfloat/4.0;
+		cv::minMaxLoc(outSmallfloat, &temp_min, &temp_max);	// get min max temperature
+		if(mode_normalisation==1) cv::normalize(outSmallfloat,outSmallfloat,255,0,cv::NORM_MINMAX);	// normalize Mat to values between 0 and 255
+		else outSmallfloat=outSmallfloat/100.0*256.0;	// convert values to full uchar8 range
+		outSmallfloat.convertTo(outSmall,CV_8UC1);	// convert float mat to uchar8 mat
 		if(mode_interpolation) cv::resize(outSmall,outSmallnorm,cv::Size(320,320));	// resize Mat to 320 x 320 pixel
 		else cv::resize(outSmall,outSmallnorm,cv::Size(320,320),0,0,cv::INTER_NEAREST);	// resize Mat to 320 x 320 pixel
 		cv::applyColorMap(outSmallnorm,outColor,cv::COLORMAP_JET);  // generate colored output with colormap
@@ -242,9 +259,20 @@ int main(int argv, char **argc)
 			combined.copyTo(cameraImageBigOutput(cv::Rect(0,0,320,320)));
 		}
 		else outColor.copyTo(cameraImageBigOutput(cv::Rect(0,0,320,320)));	// copy sensor image to output mat
-		cv::rectangle(cameraImageBigOutput, cv::Point(345,30), cv::Point(380,290), cv::Scalar(0), -1);	// clear area for temp display
-		sprintf(stringBuf,"%.1f",temp_max);
-		cv::putText(cameraImageBigOutput, stringBuf, cv::Point(345,295-(temp_max*2.56)),1,1,cv::Scalar(255,255,255));
+		if(mode_normalisation==0)
+		{
+			cv::rectangle(cameraImageBigOutput, cv::Point(345,30), cv::Point(380,290), cv::Scalar(0), -1);	// clear area for temp display
+			sprintf(stringBuf,"%.1f",temp_max);
+			cv::putText(cameraImageBigOutput, stringBuf, cv::Point(345,295-(temp_max*2.56)),1,1,cv::Scalar(255,255,255));
+		}
+		else if(mode_normalisation==1)
+		{
+			cv::rectangle(cameraImageBigOutput, cv::Point(345,0), cv::Point(380,320), cv::Scalar(0), -1);	// clear area for temp display
+			sprintf(stringBuf,"%.1f",temp_max);
+			cv::putText(cameraImageBigOutput, stringBuf, cv::Point(345,25),1,1,cv::Scalar(255,255,255));
+			sprintf(stringBuf,"%.1f",temp_min);
+			cv::putText(cameraImageBigOutput, stringBuf, cv::Point(345,305),1,1,cv::Scalar(255,255,255));
+		}
 
 		if(mode_log) logfile<<temp_max<<std::endl;
 		if(!mode_quiet) cv::imshow("combined",cameraImageBigOutput);  // display mat on screen
@@ -258,7 +286,7 @@ int main(int argv, char **argc)
 		}
 
 		t.stop();    // stop timer  
-		printf("max. Temp: %f\n",temp_max);
+		printf("max. Temp: %f - min. Temp: %f\n",temp_max,temp_min);
 	        printf("Time: %f ms\n", (double)t.getTimeMilli() / t.getCounter());  // print result of timer  
 		
 		char key = cv::waitKey(1);  // check keys for input
