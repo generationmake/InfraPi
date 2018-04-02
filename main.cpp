@@ -62,11 +62,6 @@ int main(int argv, char **argc)
 	bool mode_log=0;
 	bool mode_camera=1;
 
-	if(argv<2)
-	{
-		usage();
-		exit(1);
-	}
 	for(i=1;i<argv;i++)
 	{
 		printf("%i: %s\n",i,argc[i]);
