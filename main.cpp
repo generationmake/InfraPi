@@ -27,6 +27,7 @@ void usage(void)
 	printf("usage of ThermoCam\n");
 	printf("-q           quiet mode, no live output of image\n");
 	printf("-h           print this help\n");
+	printf("-nocam       don't use camera input, just temperature sensor\n");
 	printf("-i           use interpolation on thermal data\n");
 	printf("-f <file>    generate image file from each frame\n");
 	printf("-s <file>    generate file with temperature data from each frame\n");
@@ -50,6 +51,7 @@ int main(int argv, char **argc)
 	char *name_file="/dev/shm/image/opencv_stream.jpg";
 	char *name_tempfile="/dev/shm/temp.dat";
 	char *name_log="temp.log";
+	std::thread tcam;	// create thread pointer
 
 // flags
 	bool mode_quiet=0;
@@ -58,6 +60,7 @@ int main(int argv, char **argc)
 	bool mode_file=0;
 	bool mode_tempfile=0;
 	bool mode_log=0;
+	bool mode_camera=1;
 
 	if(argv<2)
 	{
@@ -74,6 +77,7 @@ int main(int argv, char **argc)
 		}
 		if(strncmp(argc[i],"-q",2)==0) mode_quiet=1;
 		if(strncmp(argc[i],"-i",2)==0) mode_interpolation=1;
+		if(strncmp(argc[i],"-nocam",6)==0) mode_camera=0;
 		if(strncmp(argc[i],"-v",2)==0)
 		{
 			mode_video=1;
@@ -125,6 +129,7 @@ int main(int argv, char **argc)
 	}
 	printf("mode_quiet = %i\n", mode_quiet);
 	printf("mode_interpolation = %i\n", mode_interpolation);
+	printf("mode_camera = %i\n", mode_camera);
 	printf("mode_video = %i\n", mode_video);
 	printf("mode_file  = %i\n", mode_file);
 	printf("mode_tempfile  = %i\n", mode_tempfile);
@@ -156,9 +161,12 @@ int main(int argv, char **argc)
 	cv::Mat cameraImageBig(320,320,CV_8UC3);  // create opencv mat for camera with final resolution
 	cv::Mat cameraImageBigOutput(320,380,CV_8UC3);  // create opencv mat for output with space for tempBar
 
-	cap.open(0);		// open camera
-	cap.set(CV_CAP_PROP_FRAME_WIDTH, 320);	// change camera width to 320 - we do not need more
-	cap.set(CV_CAP_PROP_FRAME_HEIGHT, 240);	// change camera height to 240
+	if(mode_camera==1)
+	{
+		cap.open(0);		// open camera
+		cap.set(CV_CAP_PROP_FRAME_WIDTH, 320);	// change camera width to 320 - we do not need more
+		cap.set(CV_CAP_PROP_FRAME_HEIGHT, 240);	// change camera height to 240
+	}
 
 	cv::VideoWriter outputVideo;	// create video output
 	if(mode_video)
@@ -190,8 +198,11 @@ int main(int argv, char **argc)
 	tempBar.copyTo(cameraImageBigOutput(cv::Rect(330, 32, 5, 256)));	// copy tempBar to big image
 	cv::putText(cameraImageBigOutput, "100", cv::Point(345,25),1,1,cv::Scalar(255,255,255));
 	cv::putText(cameraImageBigOutput, "0", cv::Point(345,305),1,1,cv::Scalar(255,255,255));
-	cap >> cameraImage;	// copy camera input to opencv mat to get data to startup
-	std::thread tcam(cameraThread);	// start extra thread to get camera input
+	if(mode_camera==1)
+	{
+		cap >> cameraImage;	// copy camera input to opencv mat to get data to startup
+		tcam=std::thread(cameraThread);	// start extra thread to get camera input
+	}
 	while(end==1)  // check end variable
 	{
 		timestamp=std::time(NULL);
@@ -227,11 +238,15 @@ int main(int argv, char **argc)
 		if(mode_interpolation) cv::resize(outSmall,outSmallnorm,cv::Size(320,320));	// resize Mat to 320 x 320 pixel
 		else cv::resize(outSmall,outSmallnorm,cv::Size(320,320),0,0,cv::INTER_NEAREST);	// resize Mat to 320 x 320 pixel
 		cv::applyColorMap(outSmallnorm,outColor,cv::COLORMAP_JET);  // generate colored output with colormap
-		cv::cvtColor(cameraImage,cameraImageGray,CV_RGB2GRAY);	// convert camera image to grayscale
-		cv::cvtColor(cameraImageGray,cameraImageGray,CV_GRAY2RGB);	// make cameraImage 3 channels again
-		cameraImageGray.copyTo(cameraImageBig(cv::Rect(0,40,320,240)));	// copy camera ingae to mat with same resolution as temperature mat
-		cv::addWeighted(cameraImageBig,0.5,outColor,0.5,0.0,combined);	// combine camera mat and temperature mat into one single image
-		combined.copyTo(cameraImageBigOutput(cv::Rect(0,0,320,320)));
+		if(mode_camera==1)
+		{
+			cv::cvtColor(cameraImage,cameraImageGray,CV_RGB2GRAY);	// convert camera image to grayscale
+			cv::cvtColor(cameraImageGray,cameraImageGray,CV_GRAY2RGB);	// make cameraImage 3 channels again
+			cameraImageGray.copyTo(cameraImageBig(cv::Rect(0,40,320,240)));	// copy camera ingae to mat with same resolution as temperature mat
+			cv::addWeighted(cameraImageBig,0.5,outColor,0.5,0.0,combined);	// combine camera mat and temperature mat into one single image
+			combined.copyTo(cameraImageBigOutput(cv::Rect(0,0,320,320)));
+		}
+		else outColor.copyTo(cameraImageBigOutput(cv::Rect(0,0,320,320)));	// copy sensor image to output mat
 		cv::rectangle(cameraImageBigOutput, cv::Point(345,30), cv::Point(380,290), cv::Scalar(0), -1);	// clear area for temp display
 		sprintf(stringBuf,"%.1f",temp_max);
 		cv::putText(cameraImageBigOutput, stringBuf, cv::Point(345,295-(temp_max*2.56)),1,1,cv::Scalar(255,255,255));
